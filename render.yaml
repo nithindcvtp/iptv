@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: s1-iptv
+    runtime: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python iptv_host.py"
+    envVars:
+      - key: OPEN_BROWSER
+        value: "0"
