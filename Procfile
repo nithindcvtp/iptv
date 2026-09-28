@@ -1,1 +1,0 @@
-web: python iptv_host.py\n
