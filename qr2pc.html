@@ -65,8 +65,7 @@ a.lnk{text-decoration:none;display:inline-flex;align-items:center}
   <div class="cam" id="cam"><video id="v" playsinline muted></video></div>
   <canvas id="cv"></canvas>
   <button class="btn pri" id="scanBtn" hidden style="width:100%;min-height:58px;font-size:19px;margin-top:14px">Scan</button>
-  <button class="btn" id="photoBtn" hidden style="width:100%;min-height:50px;margin-top:10px">📷 Scan from a photo</button>
-  <input type="file" id="photoIn" accept="image/*" hidden>
+  <button class="btn" id="photoBtn" hidden style="width:100%;min-height:50px;margin-top:10px">📷 Take photo &amp; analyze</button>
   <div class="row"><button class="btn pri" id="startCam">Start camera</button><button class="btn" id="asPC">Use this device as the PC</button></div>
   <p class="msg" id="mst"></p>
   <div class="card" id="recent" hidden><h2>Sent to PC</h2><div id="rlist"></div></div>
@@ -12585,7 +12584,7 @@ function connect(code, n = 0) {
 }
 async function startCam() {
   if (stream) return;
-  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false }); }
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }); }
   catch (e) { say($("#mst"), "Camera blocked. Allow camera access for this site, then reload.", "err"); return; }
   vid.srcObject = stream; await vid.play(); $("#startCam").hidden = true; requestAnimationFrame(loop);
 }
@@ -12663,19 +12662,26 @@ async function decodeBitmap(img, useDet) {
   }
   return out;
 }
-$("#photoBtn").onclick = () => $("#photoIn").click();
-$("#photoIn").onchange = async e => {
-  const f = e.target.files[0]; e.target.value = ""; if (!f || !conn || !conn.open) return;
-  const st = $("#mst"); say(st, "Analyzing photo…");
+$("#photoBtn").onclick = async () => {
+  if (!conn || !conn.open) return;
+  const st = $("#mst"); disarm();
+  if (!stream) await startCam(); if (!stream) return;
+  say(st, "Taking photo…"); if (navigator.vibrate) navigator.vibrate(20);
   try {
-    let img; try { img = await createImageBitmap(f, { imageOrientation: "from-image" }); } catch (x) { img = await createImageBitmap(f); }
-    let res = det ? await decodeBitmap(img, true) : new Map();
-    if (!res.size) res = await decodeBitmap(img, false);
-    if (!res.size) { say(st, "No barcode found. Try a closer, sharper photo with good light and the code filling most of the picture.", "err"); return; }
+    let img = null;                               // best case: a full-quality still from the live camera
+    if (window.ImageCapture) try { img = await createImageBitmap(await new ImageCapture(stream.getVideoTracks()[0]).takePhoto()); } catch (x) {}
+    if (!img) img = await createImageBitmap(vid); // otherwise grab the current full-size video frame
+    const side = Math.min(img.width, img.height) * 0.64;   // same area as the on-screen frame
+    const crop = await createImageBitmap(img, (img.width - side) / 2, (img.height - side) / 2, side, side);
+    say(st, "Analyzing…");
+    let res = det ? await decodeBitmap(crop, true) : new Map();
+    if (!res.size) res = await decodeBitmap(crop, false);
+    if (!res.size) { say(st, "No barcode found. Move closer, hold steady with good light, keep the code inside the frame and try again.", "err"); return; }
     res.forEach((fmt, text) => deliver(text, fmt));
     beep([880, 1320]); if (navigator.vibrate) navigator.vibrate(60);
+    $("#cam").classList.add("hit"); setTimeout(() => $("#cam").classList.remove("hit"), 600);
     say(st, `Sent ${res.size} code${res.size > 1 ? "s" : ""} to PC ✓`, "ok");
-  } catch (x) { say(st, "Couldn't read that photo.", "err"); }
+  } catch (x) { say(st, "Couldn't take the photo. Try again.", "err"); }
 };
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && stream && vid.paused) vid.play().catch(() => {}); });
 
