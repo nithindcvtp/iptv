@@ -20,6 +20,7 @@ p{color:var(--mute)}
 .big.go{background:var(--acc);color:var(--accInk);border-color:var(--acc)}.big.go span{color:inherit;opacity:.85}
 button,input{font:inherit}
 .btn{min-height:48px;padding:0 20px;border-radius:14px;border:2px solid var(--ink);background:var(--card);color:var(--ink);cursor:pointer;font-weight:600}
+a.btn{display:inline-flex;align-items:center;text-decoration:none}
 .btn.pri{background:var(--acc);border-color:var(--acc);color:var(--accInk)}
 .btn:focus-visible,.big:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
 .row{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
@@ -45,12 +46,12 @@ dialog ol{padding-left:20px;margin:12px 0 16px}dialog li{margin:8px 0}
 <dialog id="intro">
   <h2>Before you start</h2>
   <ol>
-    <li>Turn on the <b>hotspot</b> on one phone in its settings then connect the other device to it. Or put both devices on the same Wi-Fi.</li>
+    <li>Turn on the <b>hotspot</b> on one phone in its settings, then connect the other device to it. Or put both devices on the same Wi-Fi.</li>
     <li>Open this page on <b>both</b> devices.</li>
     <li>On the sending device, tap <b>Send</b> and choose a folder or files. A QR code appears.</li>
     <li>Scan it with the other device's camera, or type the code, then tap <b>Download</b>.</li>
   </ol>
-  <p>Files go straight from device to device, never to a server. Keep both screens on until it finishes.</p>
+  <p>Files go straight from device to device, never to a server. Keep this page open until it finishes.</p>
   <div class="row"><button class="btn pri" id="introOk">OK, got it</button></div>
 </dialog>
 
@@ -81,6 +82,11 @@ dialog ol{padding-left:20px;margin:12px 0 16px}dialog li{margin:8px 0}
       <div class="code" id="code"></div>
       <p style="text-align:center" id="summary"></p>
       <div class="row"><input class="link" id="link" readonly><button class="btn" id="copy">Copy link</button></div>
+      <div class="row">
+        <button class="btn pri" id="shareNative" hidden>Share…</button>
+        <a class="btn" id="wa" target="_blank" rel="noopener">WhatsApp</a>
+        <a class="btn" id="mail">Email</a>
+      </div>
     </div>
     <div class="card" id="conns"><p>Waiting for a device to scan the code…</p></div>
   </div>
@@ -98,7 +104,8 @@ dialog ol{padding-left:20px;margin:12px 0 16px}dialog li{margin:8px 0}
   <div id="got" class="card" hidden>
     <h2 id="gotTitle"></h2>
     <ul class="files" id="gotList"></ul>
-    <div class="row"><button class="btn pri" id="dl">Download</button></div>
+    <div class="row"><button class="btn pri" id="dl">Download</button><button class="btn" id="dlZip">Download as ZIP</button></div>
+    <p style="font-size:14px;margin-top:8px">On a computer, <b>Download</b> opens a folder window: click <b>New folder</b>, name it, open it, then choose <b>Select Folder</b>. Or use <b>Download as ZIP</b>, which goes to your Downloads folder automatically.</p>
     <div class="bar" hidden><i id="barI"></i></div>
     <p id="prog"></p>
   </div>
@@ -2418,6 +2425,9 @@ var qrcode = function() {
 "use strict";
 const $ = s => document.querySelector(s), PRE = "handoff-", CH = 16384;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+let wantAwake = false;
+async function keepAwake() { wantAwake = true; try { if (navigator.wakeLock) await navigator.wakeLock.request("screen"); } catch (e) {} }
+document.addEventListener("visibilitychange", () => { if (wantAwake && document.visibilityState === "visible") keepAwake(); });
 const send = (c, o) => c.send(JSON.stringify(o));
 const fmt = n => { const u = ["B","KB","MB","GB"]; let i = 0; while (n >= 1024 && i < 3) { n /= 1024; i++; } return (i ? n.toFixed(1) : n) + " " + u[i]; };
 const dev = () => /iPhone|iPad/.test(navigator.userAgent) ? "iPhone/iPad" : /Android/.test(navigator.userAgent) ? "Android device" : "computer";
@@ -2444,12 +2454,17 @@ function qrSvg(t) {
   return `<svg viewBox="0 0 ${n + 2 * m} ${n + 2 * m}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
 }
 function share(tries = 0) {
+  keepAwake();
   const code = newCode(), total = files.reduce((a, x) => a + x.f.size, 0);
   const peer = new PeerC(PRE + code);
   peer.on("open", () => {
     const url = location.origin + location.pathname + "#join=" + code;
     $("#qr").innerHTML = qrSvg(url); $("#code").textContent = pretty(code); $("#link").value = url;
     $("#summary").textContent = `${files.length} file${files.length > 1 ? "s" : ""} · ${fmt(total)}`;
+    const txt = "Open this link to receive my files with Handoff (keep my screen open until it finishes): ";
+    $("#wa").href = "https://wa.me/?text=" + encodeURIComponent(txt + url);
+    $("#mail").href = "mailto:?subject=" + encodeURIComponent("Files for you (Handoff)") + "&body=" + encodeURIComponent(txt + url);
+    if (navigator.share) { $("#shareNative").hidden = false; $("#shareNative").onclick = () => navigator.share({ title: "Handoff", text: txt, url }).catch(() => {}); }
     $("#pick").hidden = true; $("#share").hidden = false; $("#sendErr").textContent = "";
   });
   peer.on("connection", c => serve(c, total));
@@ -2506,7 +2521,7 @@ $("#join").onclick = () => connect($("#codeIn").value.replace(/[^A-Za-z0-9]/g, "
 $("#codeIn").oninput = e => { const v = e.target.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 8); e.target.value = v.length > 4 ? pretty(v) : v; };
 function connect(code) {
   if (code.length !== 8) return rmsg("Enter the 8-character code.", "err");
-  show("recv"); rmsg("Connecting…");
+  show("recv"); keepAwake(); rmsg("Connecting…");
   const peer = new PeerC();
   peer.on("error", e => rmsg(e.type === "peer-unavailable" ? "Code not found. Check it, and make sure the sender's page is still open." : "Connection failed (" + e.type + ").", "err"));
   peer.on("open", () => {
@@ -2528,17 +2543,26 @@ async function onData(d) {
     $("#gotList").innerHTML = ""; list.forEach(x => { const li = document.createElement("li"); li.innerHTML = "<span></span><span></span>"; li.firstChild.textContent = x[0]; li.lastChild.textContent = fmt(x[1]); $("#gotList").appendChild(li); });
   } else if (m.t === "file") await openSink(m.i);
   else if (m.t === "eof") await cur.close();
-  else if (m.t === "done") { finished = true; $("#dl").hidden = true; rmsg(dir ? "Saved to your folder ✓" : "Done ✓ Save your files below.", "ok"); if (!dir) offer(); }
+  else if (m.t === "done") { finished = true; $("#dl").hidden = $("#dlZip").hidden = true; rmsg(dir ? "Saved to your folder ✓" : "Done ✓ Save your files below.", "ok"); if (!dir) offer(); }
 }
 function prog() {
   $("#barI").style.width = (got / (totalIn || 1) * 100) + "%";
   $("#prog").textContent = `${fmt(got)} of ${fmt(totalIn)} · ${fmt(got / ((Date.now() - t0) / 1000 || 1))}/s`;
 }
-$("#dl").onclick = async () => {
-  if (window.showDirectoryPicker) { try { dir = await showDirectoryPicker({ mode: "readwrite" }); } catch (e) { return; } }
-  $("#dl").disabled = true; document.querySelector("#got .bar").hidden = false; t0 = Date.now(); got = 0;
+$("#dlZip").onclick = () => begin(false);
+$("#dl").onclick = () => begin(true);
+async function begin(useFolder) {
+  dir = null;
+  if (useFolder && window.showDirectoryPicker) {
+    try { dir = await showDirectoryPicker({ mode: "readwrite", id: "handoff", startIn: "downloads" }); }
+    catch (e) {
+      if (e.name === "AbortError") return;
+      rmsg("The browser blocks that folder (Desktop, Downloads and Documents are protected). Saving as a ZIP instead. Next time, create a new folder inside Desktop and pick that.");
+    }
+  }
+  $("#dl").disabled = $("#dlZip").disabled = true; document.querySelector("#got .bar").hidden = false; t0 = Date.now(); got = 0;
   send(rconn, { t: "start" });
-};
+}
 async function openSink(i) {
   const path = list[i][0];
   if (dir) {
