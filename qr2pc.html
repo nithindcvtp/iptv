@@ -35,19 +35,21 @@ ol{padding-left:20px;color:var(--mute);margin-top:10px}li{margin:4px 0}
 .item small{color:var(--mute)}
 .item .row{margin-top:8px}
 canvas{display:none}
+.top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.snd{width:46px;height:46px;border-radius:50%;border:2px solid var(--ink);background:var(--card);color:var(--ink);font-size:22px;line-height:1;cursor:pointer;flex-shrink:0;margin-top:18px}
+.snd.on{background:#16a34a;border-color:#16a34a;color:#fff}
 a.lnk{text-decoration:none;display:inline-flex;align-items:center}
 </style>
 </head>
 <body>
 <main>
 <section id="pc" hidden>
-  <h1>Scan2PC</h1>
+  <div class="top"><h1>Scan2PC</h1><button class="snd" id="snd" aria-label="Sound"></button></div>
   <p>Scan QR codes and barcodes with your phone and get them here, ready to copy.</p>
   <div class="card">
     <div id="qr"></div>
     <div class="code" id="code"></div>
     <p class="msg" id="pst" style="text-align:center">Starting…</p>
-    <div class="row" style="justify-content:center;margin-top:6px"><button class="btn sm" id="snd">🔔 Click anywhere to enable sound</button></div>
     <ol><li>Open your phone's camera and scan this code.</li><li>Tap the link it shows. Allow the camera.</li><li>Point the phone at any QR code or barcode. It appears below.</li></ol>
   </div>
   <div class="card" id="res" hidden>
@@ -58,11 +60,13 @@ a.lnk{text-decoration:none;display:inline-flex;align-items:center}
 </section>
 
 <section id="phone" hidden>
-  <h1>Scan2PC</h1>
+  <div class="top"><h1>Scan2PC</h1><button class="snd" id="snd2" aria-label="Sound"></button></div>
   <p id="intro">Open Scan2PC on your PC, then scan the QR code shown there.</p>
   <div class="cam" id="cam"><video id="v" playsinline muted></video></div>
   <canvas id="cv"></canvas>
   <button class="btn pri" id="scanBtn" hidden style="width:100%;min-height:58px;font-size:19px;margin-top:14px">Scan</button>
+  <button class="btn" id="photoBtn" hidden style="width:100%;min-height:50px;margin-top:10px">📷 Scan from a photo</button>
+  <input type="file" id="photoIn" accept="image/*" hidden>
   <div class="row"><button class="btn pri" id="startCam">Start camera</button><button class="btn" id="asPC">Use this device as the PC</button></div>
   <p class="msg" id="mst"></p>
   <div class="card" id="recent" hidden><h2>Sent to PC</h2><div id="rlist"></div></div>
@@ -12500,29 +12504,30 @@ async function copy(text, btn) {
 }
 
 /* ---------- sound ---------- */
-let ac = null, muted = false, audioReady = false, wasReady = false;
-function unlockAudio() {
-  wasReady = audioReady; audioReady = true;
-  try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); if (ac.state !== "running") ac.resume().then(updSnd); } catch (e) {}
-  updSnd();
+let ac = null, soundOn = false;
+function ensureCtx() {
+  try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); if (ac.state !== "running") ac.resume(); } catch (e) {}
 }
-["pointerdown", "keydown", "touchstart"].forEach(e => document.addEventListener(e, unlockAudio, { passive: true }));
+["click", "touchend", "keydown"].forEach(e => document.addEventListener(e, ensureCtx, { passive: true }));   // counts as a real user gesture on phones
 function beep(freqs) {
-  if (muted || !ac || ac.state !== "running") return;
-  let t = ac.currentTime;
-  freqs.forEach(f => {
-    const o = ac.createOscillator(), g = ac.createGain(); o.type = "sine"; o.frequency.value = f;
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.35, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
-    o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + 0.15); t += 0.14;
-  });
+  if (!soundOn) return; ensureCtx(); if (!ac) return;
+  const go = () => {
+    let t = ac.currentTime;
+    freqs.forEach(f => {
+      const o = ac.createOscillator(), g = ac.createGain(); o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.4, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+      o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + 0.15); t += 0.14;
+    });
+  };
+  ac.state === "running" ? go() : ac.resume().then(go).catch(() => {});
 }
-function updSnd() { $("#snd").textContent = muted ? "🔕 Sound off (click to turn on)" : ac && ac.state === "running" ? "🔔 Sound on (click to mute)" : "🔔 Click anywhere to enable sound"; }
-$("#snd").onclick = () => { if (wasReady) muted = !muted; updSnd(); };
+function updSnd() { ["#snd", "#snd2"].forEach(id => { const b = $(id); b.textContent = soundOn ? "🔊" : "🔇"; b.classList.toggle("on", soundOn); b.title = soundOn ? "Sound on (tap to mute)" : "Sound off (tap to turn on)"; }); }
+["#snd", "#snd2"].forEach(id => $(id).onclick = () => { soundOn = !soundOn; updSnd(); if (soundOn) beep([660, 990]); });
 
 /* ---------- PC side ---------- */
 const items = [];
 function startPC() {
-  show("pc");
+  show("pc"); soundOn = false; updSnd();
   let code = sessionStorage.getItem("s2pc") || newCode();
   try { sessionStorage.setItem("s2pc", code); } catch (e) {}
   const peer = new PeerC(PRE + code), st = $("#pst");
@@ -12559,7 +12564,7 @@ $("#clear").onclick = () => { items.length = 0; $("#list").innerHTML = ""; $("#r
 let conn = null, mp = null, stream = null, pairing = false, last = { v: "", t: 0 }, lastT = 0;
 const vid = $("#v"), cv = $("#cv"), cx = cv.getContext("2d", { willReadFrequently: true });
 function startPhone(code) {
-  show("phone"); $("#asPC").hidden = !!code;
+  show("phone"); soundOn = true; updSnd(); $("#asPC").hidden = !!code;
   if (code) { $("#intro").textContent = "Pairing with your PC…"; connect(code); }
   $("#startCam").onclick = startCam;
   $("#asPC").onclick = () => { stopCam(); startPC(); };
@@ -12574,8 +12579,8 @@ function connect(code, n = 0) {
   });
   peer.on("open", () => {
     conn = peer.connect(PRE + code, { reliable: true, serialization: "json" });
-    conn.on("open", () => { $("#intro").textContent = "Aim a QR code or barcode inside the frame, then tap Scan."; say(st, "Connected to PC ✓ Tap Scan when ready.", "ok"); $("#scanBtn").hidden = false; startCam(); });
-    conn.on("close", () => { conn = null; disarm(); $("#scanBtn").hidden = true; say(st, "Disconnected. Reconnecting…"); setTimeout(() => connect(code), 2000); });
+    conn.on("open", () => { $("#intro").textContent = "Aim a QR code or barcode inside the frame, then tap Scan."; say(st, "Connected to PC ✓ Tap Scan when ready.", "ok"); $("#scanBtn").hidden = false; $("#photoBtn").hidden = false; startCam(); });
+    conn.on("close", () => { conn = null; disarm(); $("#scanBtn").hidden = true; $("#photoBtn").hidden = true; say(st, "Disconnected. Reconnecting…"); setTimeout(() => connect(code), 2000); });
   });
 }
 async function startCam() {
@@ -12623,6 +12628,12 @@ function arm() {
 }
 function disarm() { armed = false; clearTimeout(armT); $("#scanBtn").textContent = "Scan"; $("#cam").classList.remove("armed"); }
 $("#scanBtn").onclick = async () => { if (armed) return disarm(); if (!stream) await startCam(); arm(); };
+function deliver(text, fmt) {
+  conn.send({ t: "scan", v: text, f: fmt });
+  $("#recent").hidden = false;
+  const d = document.createElement("div"); d.className = "item"; d.innerHTML = "<div class='t'></div>"; d.firstChild.textContent = text + (fmt ? "  (" + fmt + ")" : ""); $("#rlist").prepend(d);
+  while ($("#rlist").children.length > 5) $("#rlist").lastChild.remove();
+}
 function found(text, fmt) {
   if (!conn) {                                   // not paired yet: look for the PC's pairing code
     const m = text.match(/pair=([A-Za-z0-9]{8})/);
@@ -12630,15 +12641,42 @@ function found(text, fmt) {
     return;
   }
   if (!armed || !conn.open) return;              // one scan per button press
-  disarm();
-  conn.send({ t: "scan", v: text, f: fmt });
+  disarm(); deliver(text, fmt);
   beep([880, 1320]); if (navigator.vibrate) navigator.vibrate(60);
   say($("#mst"), "Sent to PC ✓ Tap Scan for the next one.", "ok");
   $("#cam").classList.add("hit"); setTimeout(() => $("#cam").classList.remove("hit"), 600);
-  $("#recent").hidden = false;
-  const d = document.createElement("div"); d.className = "item"; d.innerHTML = "<div class='t'></div>"; d.firstChild.textContent = text + (fmt ? "  (" + fmt + ")" : ""); $("#rlist").prepend(d);
-  while ($("#rlist").children.length > 5) $("#rlist").lastChild.remove();
 }
+/* ---- scan from a photo (sharper than live video) ---- */
+async function decodeBitmap(img, useDet) {
+  const out = new Map();
+  for (const max of [1600, 1000, 600]) {
+    const sc = Math.min(1, max / Math.max(img.width, img.height)), w = Math.round(img.width * sc), h = Math.round(img.height * sc);
+    cv.width = w; cv.height = h; cx.drawImage(img, 0, 0, w, h);
+    if (useDet) (await det.detect(cv)).forEach(r => out.set(r.rawValue, label(r.format)));
+    else {
+      const q = jsQR(cx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: "attemptBoth" });
+      if (q && q.data) out.set(q.data, "QR CODE");
+      const rd = zxReader();
+      if (rd) try { const Z = ZXing, r = rd.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(cv)))); out.set(r.getText(), label(Z.BarcodeFormat[r.getBarcodeFormat()])); } catch (e) {}
+    }
+    if (out.size) break;
+  }
+  return out;
+}
+$("#photoBtn").onclick = () => $("#photoIn").click();
+$("#photoIn").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f || !conn || !conn.open) return;
+  const st = $("#mst"); say(st, "Analyzing photo…");
+  try {
+    let img; try { img = await createImageBitmap(f, { imageOrientation: "from-image" }); } catch (x) { img = await createImageBitmap(f); }
+    let res = det ? await decodeBitmap(img, true) : new Map();
+    if (!res.size) res = await decodeBitmap(img, false);
+    if (!res.size) { say(st, "No barcode found. Try a closer, sharper photo with good light and the code filling most of the picture.", "err"); return; }
+    res.forEach((fmt, text) => deliver(text, fmt));
+    beep([880, 1320]); if (navigator.vibrate) navigator.vibrate(60);
+    say(st, `Sent ${res.size} code${res.size > 1 ? "s" : ""} to PC ✓`, "ok");
+  } catch (x) { say(st, "Couldn't read that photo.", "err"); }
+};
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && stream && vid.paused) vid.play().catch(() => {}); });
 
 /* ---------- start ---------- */
