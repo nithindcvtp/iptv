@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>QR Phone Call</title>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root { --bg1:#10131c; --bg2:#1b2140; --card:rgba(255,255,255,.07); --text:#f1f3f8; --muted:#a3abc2;
+          --accent:#4f9cff; --ok:#3ecf8e; --bad:#ff5c5c; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; margin:0; }
+  body { background:linear-gradient(160deg,var(--bg1),var(--bg2)); color:var(--text);
+         font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; display:flex; align-items:center;
+         justify-content:center; padding:16px; padding-top:max(16px,env(safe-area-inset-top)); padding-bottom:max(16px,env(safe-area-inset-bottom)); }
+  .card { width:100%; max-width:420px; background:var(--card); backdrop-filter:blur(10px); border-radius:24px;
+          padding:30px 24px; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,.35); }
+  h1 { font-size:1.5rem; margin:0 0 6px; }
+  p { color:var(--muted); font-size:.95rem; line-height:1.45; margin:6px 0 18px; }
+  input[type=text] { width:100%; padding:14px; border-radius:14px; border:1px solid rgba(255,255,255,.18);
+          background:rgba(0,0,0,.25); color:var(--text); font-size:1rem; text-align:center; margin-bottom:12px; }
+  .btn { width:100%; border:0; border-radius:14px; padding:15px; font-size:1.05rem; font-weight:600; cursor:pointer;
+         background:var(--accent); color:#fff; margin-top:8px; }
+  .btn.ghost { background:transparent; border:1px solid rgba(255,255,255,.25); color:var(--text); }
+  .hidden { display:none !important; }
+  #qr { display:inline-block; background:#fff; padding:14px; border-radius:16px; margin:6px 0 10px; }
+  #qr img,#qr canvas { display:block; }
+  .small { font-size:.75rem; color:var(--muted); word-break:break-all; margin-bottom:8px; }
+  .pill { display:inline-flex; align-items:center; gap:8px; font-size:.9rem; color:var(--muted); margin:8px 0; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); }
+  .dot.wait { background:#f5b942; animation:blink 1.2s infinite; }
+  .dot.ok { background:var(--ok); } .dot.bad { background:var(--bad); }
+  @keyframes blink { 50% { opacity:.3; } }
+
+  /* call screen */
+  .people { display:flex; justify-content:space-around; margin:10px 0 18px; }
+  .person { width:42%; }
+  .avatar { --lvl:0; width:92px; height:92px; border-radius:50%; margin:10px auto 12px; display:flex; align-items:center;
+            justify-content:center; font-size:2.2rem; font-weight:700; color:#fff;
+            background:linear-gradient(135deg,#4f9cff,#8b5cf6);
+            box-shadow:0 0 0 calc(var(--lvl)*16px) rgba(62,207,142,.35); transition:box-shadow .08s linear; }
+  .person.them .avatar { background:linear-gradient(135deg,#f472b6,#fb923c); }
+  .pname { font-weight:600; font-size:1rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .timer { font-size:2rem; font-variant-numeric:tabular-nums; font-weight:300; margin:4px 0; }
+  .controls { display:flex; justify-content:center; gap:28px; margin-top:18px; }
+  .round { width:68px; height:68px; border-radius:50%; border:0; font-size:1.6rem; cursor:pointer; color:#fff;
+           background:rgba(255,255,255,.14); }
+  .round.off { background:#fff; color:#111; }
+  .round.hang { background:var(--bad); }
+  .tip { font-size:.78rem; color:var(--muted); margin-top:18px; }
+</style>
+</head>
+<body>
+
+<!-- Host: landing -->
+<div id="vStart" class="card hidden">
+  <h1>📞 QR Phone Call</h1>
+  <p>Start a call, show the QR code, and the other person scans it to talk with you. No accounts, no apps.</p>
+  <input type="text" id="hostName" placeholder="Your name (optional)" maxlength="20">
+  <button class="btn" id="startBtn">Start a call</button>
+  <div class="pill"><span class="dot bad hidden" id="startErrDot"></span><span id="startErr"></span></div>
+</div>
+
+<!-- Host: waiting with QR -->
+<div id="vQr" class="card hidden">
+  <h1>Scan to join</h1>
+  <p>Ask the other person to scan this with their phone camera.</p>
+  <div id="qr"></div>
+  <div class="small" id="linkText"></div>
+  <button class="btn ghost" id="copyBtn">Copy link</button>
+  <div class="pill"><span class="dot wait"></span><span>Waiting for them to join…</span></div>
+  <button class="btn ghost" id="cancelBtn">Cancel</button>
+</div>
+
+<!-- Guest: join -->
+<div id="vJoin" class="card hidden">
+  <h1>📞 You're invited to a call</h1>
+  <p>Tap join and allow microphone access to start talking.</p>
+  <input type="text" id="guestName" placeholder="Your name (optional)" maxlength="20">
+  <button class="btn" id="joinBtn">Join call</button>
+  <div class="pill"><span class="dot bad hidden" id="joinErrDot"></span><span id="joinErr"></span></div>
+</div>
+
+<!-- In call -->
+<div id="vCall" class="card hidden">
+  <div class="pill"><span class="dot wait" id="callDot"></span><span id="callStatus">Connecting…</span></div>
+  <div class="timer" id="timer">00:00</div>
+  <div class="people">
+    <div class="person me"><div class="avatar" id="avMe">Y</div><div class="pname" id="nameMe">You</div></div>
+    <div class="person them"><div class="avatar" id="avThem">?</div><div class="pname" id="nameThem">…</div></div>
+  </div>
+  <button class="btn hidden" id="tapHear">🔊 Tap to hear</button>
+  <div class="controls">
+    <button class="round" id="muteBtn" title="Mute">🎤</button>
+    <button class="round hang" id="hangBtn" title="Hang up">📵</button>
+  </div>
+  <div class="tip">Use headphones to avoid echo.</div>
+  <audio id="remoteAudio" autoplay playsinline></audio>
+</div>
+
+<!-- Ended -->
+<div id="vEnd" class="card hidden">
+  <h1>Call ended</h1>
+  <p id="endInfo">Thanks for talking!</p>
+  <button class="btn" onclick="location.href=location.pathname">Start a new call</button>
+</div>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const VIEWS = ['vStart','vQr','vJoin','vCall','vEnd'];
+  const show = v => VIEWS.forEach(x => $(x).classList.toggle('hidden', x !== v));
+
+  const ICE = { iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'turn:eu-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
+    { urls: 'turn:us-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turns:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+  ]};
+  // Optional: your own free TURN credentials from https://www.metered.ca/stun-turn (helps behind firewalls)
+  const MY_TURN_USERNAME = '';
+  const MY_TURN_PASSWORD = '';
+  if (MY_TURN_USERNAME) {
+    ICE.iceServers.unshift(
+      { urls: 'turn:relay.metered.ca:80', username: MY_TURN_USERNAME, credential: MY_TURN_PASSWORD },
+      { urls: 'turn:relay.metered.ca:443', username: MY_TURN_USERNAME, credential: MY_TURN_PASSWORD },
+      { urls: 'turn:relay.metered.ca:443?transport=tcp', username: MY_TURN_USERNAME, credential: MY_TURN_PASSWORD },
+      { urls: 'turns:relay.metered.ca:443?transport=tcp', username: MY_TURN_USERNAME, credential: MY_TURN_PASSWORD }
+    );
+  }
+
+  let peer, localStream, call, dataConn, myName = 'You', timerId, secs = 0, started = false, ended = false;
+  const ctxs = [];
+
+  function getMic() {
+    return navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
+    });
+  }
+
+  function level(stream, el) {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)(); ctxs.push(ctx);
+      const an = ctx.createAnalyser(); an.fftSize = 512;
+      ctx.createMediaStreamSource(stream).connect(an);
+      const buf = new Uint8Array(an.fftSize);
+      (function tick() {
+        if (ended) return;
+        an.getByteTimeDomainData(buf);
+        let p = 0; for (let i = 0; i < buf.length; i++) p = Math.max(p, Math.abs(buf[i] - 128));
+        el.style.setProperty('--lvl', Math.min(1, p / 70));
+        requestAnimationFrame(tick);
+      })();
+    } catch (e) {}
+  }
+
+  function setName(el, avEl, name) {
+    name = (name || '').trim() || 'Guest';
+    el.textContent = name; avEl.textContent = name[0].toUpperCase();
+  }
+
+  function setStatus(text, cls) { $('callStatus').textContent = text; $('callDot').className = 'dot ' + cls; }
+
+  function enterCall() {
+    show('vCall');
+    setName($('nameMe'), $('avMe'), myName);
+    level(localStream, $('avMe'));
+    setStatus('Connecting…', 'wait');
+  }
+
+  function onRemote(stream) {
+    if (started) return; started = true;
+    const audio = $('remoteAudio');
+    audio.srcObject = stream;
+    audio.play().catch(() => $('tapHear').classList.remove('hidden'));
+    level(stream, $('avThem'));
+    setStatus('Connected', 'ok');
+    timerId = setInterval(() => {
+      secs++;
+      $('timer').textContent = String(Math.floor(secs / 60)).padStart(2, '0') + ':' + String(secs % 60).padStart(2, '0');
+    }, 1000);
+  }
+
+  function watch(c) {
+    const pc = c.peerConnection;
+    if (!pc) return;
+    pc.oniceconnectionstatechange = () => {
+      const s = pc.iceConnectionState;
+      if (s === 'failed') setStatus('Connection failed (network blocks it)', 'bad');
+      else if (s === 'disconnected') setStatus('Connection lost…', 'bad');
+      else if (s === 'connected' || s === 'completed') setStatus('Connected', 'ok');
+    };
+  }
+
+  function hookData(conn, sendNameNow) {
+    dataConn = conn;
+    conn.on('open', () => conn.send({ name: myName }));
+    conn.on('data', d => { if (d && d.name !== undefined) setName($('nameThem'), $('avThem'), d.name); });
+    conn.on('close', () => finish('The other person left the call.'));
+  }
+
+  function finish(msg) {
+    if (ended) return; ended = true;
+    clearInterval(timerId);
+    try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+    try { call && call.close(); } catch (e) {}
+    try { peer && peer.destroy(); } catch (e) {}
+    ctxs.forEach(c => { try { c.close(); } catch (e) {} });
+    const dur = secs ? ' Duration: ' + $('timer').textContent + '.' : '';
+    $('endInfo').textContent = (msg || 'Thanks for talking!') + dur;
+    show('vEnd');
+  }
+
+  /* ---------- controls ---------- */
+  $('muteBtn').onclick = () => {
+    const t = localStream.getAudioTracks()[0]; t.enabled = !t.enabled;
+    $('muteBtn').classList.toggle('off', !t.enabled);
+    $('muteBtn').textContent = t.enabled ? '🎤' : '🔇';
+  };
+  $('hangBtn').onclick = () => finish('You hung up.');
+  $('tapHear').onclick = () => { $('remoteAudio').play(); $('tapHear').classList.add('hidden'); };
+
+  const hostId = location.hash.slice(1);
+
+  /* ---------- HOST ---------- */
+  function initHost() {
+    show('vStart');
+    $('startBtn').onclick = async () => {
+      myName = $('hostName').value.trim() || 'Host';
+      $('startErr').textContent = ''; $('startErrDot').classList.add('hidden');
+      try { localStream = await getMic(); }
+      catch (e) {
+        $('startErr').textContent = 'Microphone permission is needed to call.';
+        $('startErrDot').classList.remove('hidden'); return;
+      }
+      const id = 'call-' + Math.random().toString(36).slice(2, 8);
+      peer = new Peer(id, { config: ICE });
+      peer.on('open', () => {
+        const url = location.origin + location.pathname + '#' + id;
+        $('qr').innerHTML = '';
+        new QRCode($('qr'), { text: url, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+        $('linkText').textContent = url;
+        $('copyBtn').onclick = () => navigator.clipboard.writeText(url).then(() => $('copyBtn').textContent = 'Copied ✓');
+        show('vQr');
+      });
+      peer.on('error', e => {
+        if (!started && !call) { $('startErr').textContent = 'Error: ' + e.type; $('startErrDot').classList.remove('hidden'); show('vStart'); }
+      });
+      peer.on('connection', conn => { if (!dataConn) hookData(conn); });
+      peer.on('call', c => {
+        if (call) { c.close(); return; }          // only one guest
+        call = c;
+        c.answer(localStream);
+        c.on('stream', onRemote);
+        c.on('close', () => finish('The other person left the call.'));
+        enterCall(); watch(c);
+      });
+    };
+    $('cancelBtn').onclick = () => finish('Call cancelled.');
+  }
+
+  /* ---------- GUEST ---------- */
+  function initGuest() {
+    show('vJoin');
+    $('joinBtn').onclick = async () => {
+      myName = $('guestName').value.trim() || 'Guest';
+      const err = m => { $('joinErr').textContent = m; $('joinErrDot').classList.remove('hidden'); };
+      $('joinErr').textContent = ''; $('joinErrDot').classList.add('hidden');
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return err('Microphone not available (needs HTTPS).');
+      try { localStream = await getMic(); } catch (e) { return err('Microphone permission is needed to call.'); }
+
+      $('joinBtn').disabled = true;
+      peer = new Peer({ config: ICE });
+      peer.on('error', e => {
+        $('joinBtn').disabled = false;
+        if (e.type === 'peer-unavailable') { show('vJoin'); err('This call link has expired or the host closed the page.'); }
+        else if (!started) err('Error: ' + e.type);
+      });
+      peer.on('open', () => {
+        hookData(peer.connect(hostId));
+        call = peer.call(hostId, localStream);
+        call.on('stream', onRemote);
+        call.on('close', () => finish('The other person left the call.'));
+        enterCall(); watch(call);
+      });
+    };
+  }
+
+  hostId ? initGuest() : initHost();
+  window.addEventListener('pagehide', () => { try { peer && peer.destroy(); } catch (e) {} });
+})();
+</script>
+</body>
+</html>
