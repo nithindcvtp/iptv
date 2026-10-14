@@ -93,9 +93,10 @@
   <button class="btn hidden" id="tapHear">🔊 Tap to hear</button>
   <div class="controls">
     <button class="round" id="muteBtn" title="Mute">🎤</button>
+    <button class="round" id="spkBtn" title="Loudspeaker">🔈</button>
     <button class="round hang" id="hangBtn" title="Hang up">📵</button>
   </div>
-  <div class="tip">Use headphones to avoid echo.</div>
+  <div class="tip" id="routeTip">Earpiece mode. Tap 🔈 for loudspeaker.</div>
   <audio id="remoteAudio" autoplay playsinline></audio>
 </div>
 
@@ -137,7 +138,35 @@
   let peer, localStream, call, dataConn, myName = 'You', timerId, secs = 0, started = false, ended = false;
   const ctxs = [];
 
+  /* ---------- audio routing: earpiece by default, loudspeaker on request ---------- */
+  let speakerOn = false;
+
+  async function applyRoute() {
+    // iPhone / Safari: "play-and-record" asks the OS for call-style routing (earpiece);
+    // "playback" uses the loudspeaker.
+    try {
+      if (navigator.audioSession) navigator.audioSession.type = speakerOn ? 'playback' : 'play-and-record';
+    } catch (e) {}
+    // Chrome on Android: pick an output device by name if the browser exposes one.
+    try {
+      const audio = $('remoteAudio');
+      if (audio.setSinkId && navigator.mediaDevices.enumerateDevices) {
+        const outs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
+        const want = speakerOn ? /speaker/i : /earpiece|receiver|handset|phone/i;
+        const dev = outs.find(d => want.test(d.label)) || (speakerOn ? null : outs.find(d => d.deviceId === 'communications'));
+        if (dev) await audio.setSinkId(dev.deviceId);
+      }
+    } catch (e) {}
+    $('spkBtn').classList.toggle('off', speakerOn);
+    $('spkBtn').textContent = speakerOn ? '🔊' : '🔈';
+    $('routeTip').textContent = speakerOn
+      ? 'Loudspeaker on (use headphones to avoid echo).'
+      : 'Earpiece mode. Tap 🔈 for loudspeaker.';
+  }
+  $('spkBtn').onclick = () => { speakerOn = !speakerOn; applyRoute(); };
+
   function getMic() {
+    try { if (navigator.audioSession) navigator.audioSession.type = 'play-and-record'; } catch (e) {}
     return navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
     });
@@ -178,6 +207,7 @@
     const audio = $('remoteAudio');
     audio.srcObject = stream;
     audio.play().catch(() => $('tapHear').classList.remove('hidden'));
+    applyRoute();
     level(stream, $('avThem'));
     setStatus('Connected', 'ok');
     timerId = setInterval(() => {
