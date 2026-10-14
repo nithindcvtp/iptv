@@ -6,6 +6,7 @@
 <title>QR Video Call</title>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="config.js"></script>
 <style>
   :root { --bg1:#10131c; --bg2:#1b2140; --card:rgba(255,255,255,.07); --text:#f1f3f8; --muted:#a3abc2;
           --accent:#4f9cff; --ok:#3ecf8e; --bad:#ff5c5c; }
@@ -138,27 +139,7 @@
   const VIEWS = ['vStart','vQr','vJoin','vCall','vEnd'];
   const show = v => VIEWS.forEach(x => $(x).classList.toggle('hidden', x !== v));
 
-  const ICE = { iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'turn:eu-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
-    { urls: 'turn:us-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
-    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turns:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
-  ]};
-  // Optional: your own free TURN credentials from https://www.metered.ca/stun-turn (helps behind firewalls)
-  const MY_TURN_USERNAME = '';
-  const MY_TURN_PASSWORD = '';
-  if (MY_TURN_USERNAME) {
-    ICE.iceServers.unshift(
-      { urls: 'turn:relay.metered.ca:80', username: MY_TURN_USERNAME, credential: MY_TURN_PASSWORD },
-      { urls: 'turn:relay.metered.ca:443', username: MY_TURN_USERNAME, credential: MY_TURN_PASSWORD },
-      { urls: 'turn:relay.metered.ca:443?transport=tcp', username: MY_TURN_USERNAME, credential: MY_TURN_PASSWORD },
-      { urls: 'turns:relay.metered.ca:443?transport=tcp', username: MY_TURN_USERNAME, credential: MY_TURN_PASSWORD }
-    );
-  }
+  const ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };  // replaced at runtime from config.js
 
   let peer, call, dataConn, myName = 'You', timerId, secs = 0, started = false, ended = false, wake;
   let micStream, audioTrack, camTrack = null, blackTrack, sendStream, facing = 'user', remoteCam = false;
@@ -273,7 +254,7 @@
     const pc = c.peerConnection; if (!pc) return;
     pc.oniceconnectionstatechange = () => {
       const s = pc.iceConnectionState;
-      if (s === 'failed') setStatus('Connection failed (network blocks it)', 'bad');
+      if (s === 'failed') setStatus('Connection failed. Add your own relay in config.js', 'bad');
       else if (s === 'disconnected') setStatus('Connection lost…', 'bad');
       else if (s === 'connected' || s === 'completed') setStatus('Connected', 'ok');
     };
@@ -376,6 +357,7 @@
         $('startErrDot').classList.remove('hidden'); return;
       }
       const id = 'vcall-' + Math.random().toString(36).slice(2, 8);
+      if (window.getIceConfig) ICE.iceServers = (await getIceConfig()).iceServers;
       peer = new Peer(id, { config: ICE });
       peer.on('open', () => {
         const url = location.origin + location.pathname + '#' + id;
@@ -413,6 +395,7 @@
       catch (e) { return err('Microphone permission is needed to call.'); }
 
       $('joinBtn').disabled = true;
+      if (window.getIceConfig) ICE.iceServers = (await getIceConfig()).iceServers;
       peer = new Peer({ config: ICE });
       peer.on('error', e => {
         $('joinBtn').disabled = false;
