@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network test</title>
+<script src="config.js"></script>
+<style>
+  :root { --bg:#10131c; --card:#1b2030; --text:#f1f3f8; --muted:#a3abc2; --ok:#3ecf8e; --bad:#ff5c5c; --accent:#4f9cff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; padding:18px; }
+  .wrap { max-width:560px; margin:0 auto; }
+  h1 { font-size:1.4rem; margin:6px 0; }
+  p { color:var(--muted); line-height:1.45; font-size:.95rem; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:12px; padding:14px 22px; font-size:1rem; font-weight:600; cursor:pointer; width:100%; margin:10px 0; }
+  button:disabled { opacity:.5; }
+  .row { display:flex; justify-content:space-between; gap:10px; background:var(--card); border-radius:10px; padding:10px 12px; margin:6px 0; font-size:.85rem; }
+  .row .n { word-break:break-all; }
+  .ok { color:var(--ok); font-weight:600; white-space:nowrap; } .bad { color:var(--bad); font-weight:600; white-space:nowrap; }
+  .sum { background:var(--card); border-radius:12px; padding:14px; margin:14px 0; line-height:1.5; }
+  .tag { color:var(--muted); font-size:.75rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🔧 Network test</h1>
+  <p>Open this page on the device that has the problem (on the same network). It checks which relay servers your network lets through, so you know whether calls can work.</p>
+  <button id="run">Run test</button>
+  <div class="sum" id="own"></div>
+  <div id="out"></div>
+  <div class="sum hidden" id="sum" style="display:none"></div>
+</div>
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+
+  function describe(url) {
+    const m = url.match(/^(stuns?|turns?):([^?]+)(\?.*)?$/);
+    if (!m) return url;
+    const scheme = m[1], hostport = m[2], q = m[3] || '';
+    let how = scheme.startsWith('stun') ? 'STUN' : (scheme === 'turns' ? 'TURN over TLS' : (q.includes('transport=tcp') ? 'TURN over TCP' : 'TURN (UDP)'));
+    return hostport + '  ·  ' + how;
+  }
+
+  function testUrl(server, url) {
+    const isTurn = /^turns?:/.test(url);
+    return new Promise(resolve => {
+      const t0 = performance.now(); let done = false, pc;
+      const finish = (ok, info) => { if (done) return; done = true; try { pc && pc.close(); } catch (e) {} resolve({ ok, info, ms: Math.round(performance.now() - t0) }); };
+      try {
+        pc = new RTCPeerConnection({
+          iceServers: [Object.assign({}, server, { urls: url })],
+          iceTransportPolicy: isTurn ? 'relay' : 'all'
+        });
+        pc.createDataChannel('t');
+        pc.onicecandidate = e => {
+          if (!e.candidate) return finish(false, 'no answer from server');
+          const c = e.candidate.candidate;
+          if (isTurn && / typ relay/.test(c)) finish(true, 'relay OK');
+          if (!isTurn && / typ srflx/.test(c)) finish(true, 'STUN OK');
+        };
+        pc.createOffer().then(o => pc.setLocalDescription(o)).catch(err => finish(false, String(err)));
+      } catch (err) { finish(false, String(err)); }
+      setTimeout(() => finish(false, 'blocked or no reply (timed out)'), 8000);
+    });
+  }
+
+  $('run').onclick = async () => {
+    const btn = $('run'); btn.disabled = true; btn.textContent = 'Testing… (up to 10 seconds)';
+    $('out').innerHTML = ''; $('sum').style.display = 'none';
+
+    const cfg = window.CALL_CONFIG || {};
+    const hasOwn = !!((cfg.meteredApp && cfg.meteredApiKey) || cfg.turnUsername);
+    $('own').innerHTML = hasOwn
+      ? '✅ Your own relay settings are filled in <span class="tag">(config.js)</span>.'
+      : '⚠️ No relay of your own is set in <b>config.js</b> yet. Only free public relays will be tried, and those are often blocked or overloaded.';
+
+    if (!window.getIceConfig) { $('out').textContent = 'config.js did not load. Upload it next to this page.'; btn.disabled = false; btn.textContent = 'Run test'; return; }
+    const ice = await getIceConfig();
+
+    const jobs = [];
+    ice.iceServers.forEach(s => (Array.isArray(s.urls) ? s.urls : [s.urls]).forEach(u => jobs.push({ s, u })));
+    const rows = jobs.map(j => {
+      const d = document.createElement('div'); d.className = 'row';
+      d.innerHTML = '<span class="n"></span><span class="tag">testing…</span>';
+      d.firstChild.textContent = describe(j.u);
+      $('out').appendChild(d); return d;
+    });
+
+    const results = await Promise.all(jobs.map((j, i) => testUrl(j.s, j.u).then(r => {
+      rows[i].lastChild.className = r.ok ? 'ok' : 'bad';
+      rows[i].lastChild.textContent = r.ok ? '✓ ' + r.ms + ' ms' : '✗ ' + r.info;
+      return Object.assign({ u: j.u }, r);
+    })));
+
+    const turn = results.filter(r => /^turns?:/.test(r.u));
+    const okTcp = turn.some(r => r.ok && (/turns:/.test(r.u) || /transport=tcp/.test(r.u)));
+    const okAny = turn.some(r => r.ok);
+    const sum = $('sum'); sum.style.display = 'block';
+    if (okTcp) sum.innerHTML = '✅ <b>Good:</b> a relay over TCP/TLS (port 443) works from this network, so calls should connect.';
+    else if (okAny) sum.innerHTML = '🟡 <b>Partly:</b> a relay works, but only over UDP. Strict firewalls may still block calls. Adding your own relay in <b>config.js</b> (it includes TLS on port 443) usually fixes this.';
+    else sum.innerHTML = '❌ <b>No relay is reachable from this network.</b> Calls cannot connect. Fix: create a free account at metered.ca, put its credentials into <b>config.js</b>, upload it, and run this test again. If it still fails, this network blocks relay traffic and you will need a WebSocket-based relay instead.';
+
+    btn.disabled = false; btn.textContent = 'Run test again';
+  };
+})();
+</script>
+</body>
+</html>
