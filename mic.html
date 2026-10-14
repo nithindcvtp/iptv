@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phone Wireless Mic</title>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root { --bg:#0f1115; --card:#1a1d24; --text:#e8eaed; --muted:#9aa0a6; --accent:#4f9cff; --ok:#3ecf8e; --bad:#ff5c5c; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f4f6f8; --card:#fff; --text:#1c1e21; --muted:#5f6368; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; padding:16px; }
+  .card { background:var(--card); border-radius:16px; padding:28px; width:100%; max-width:440px; text-align:center;
+          box-shadow:0 8px 30px rgba(0,0,0,.25); }
+  h1 { font-size:1.4rem; margin:0 0 6px; }
+  p { color:var(--muted); margin:6px 0 16px; line-height:1.45; font-size:.95rem; }
+  #qr { display:inline-block; background:#fff; padding:14px; border-radius:12px; margin:8px 0; }
+  #qr img, #qr canvas { display:block; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:12px; padding:14px 22px; font-size:1rem;
+           font-weight:600; cursor:pointer; width:100%; margin-top:10px; }
+  button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  button.stop { background:var(--bad); }
+  button:disabled { opacity:.5; }
+  .status { display:inline-flex; align-items:center; gap:8px; font-size:.9rem; margin:10px 0; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); }
+  .dot.ok { background:var(--ok); } .dot.bad { background:var(--bad); }
+  .meter { height:14px; background:rgba(128,128,128,.25); border-radius:8px; overflow:hidden; margin:14px 0; }
+  .meter > div { height:100%; width:0%; background:var(--ok); transition:width .06s linear; }
+  label { display:flex; align-items:center; gap:8px; justify-content:center; font-size:.9rem; color:var(--muted); margin:8px 0; }
+  select { width:100%; padding:10px; border-radius:10px; background:var(--bg); color:var(--text); border:1px solid rgba(128,128,128,.4); margin-top:6px; }
+  .hidden { display:none !important; }
+  .link { word-break:break-all; font-size:.75rem; color:var(--muted); }
+  .warn { font-size:.8rem; color:var(--muted); margin-top:14px; }
+</style>
+</head>
+<body>
+
+<!-- ============ DESKTOP / RECEIVER ============ -->
+<div id="host" class="card hidden">
+  <h1>🎙️ Phone Wireless Mic</h1>
+  <p>Scan this QR code with your iPhone or Android camera, then tap <b>Start Mic</b> on the phone.</p>
+  <div id="qr"></div>
+  <div class="link" id="linkText"></div>
+
+  <div class="status"><span class="dot" id="hostDot"></span><span id="hostStatus">Starting…</span></div>
+
+  <div id="liveBox" class="hidden">
+    <div class="meter"><div id="meterBar"></div></div>
+    <button id="enableAudio" class="hidden">🔊 Click to enable audio</button>
+    <label><input type="checkbox" id="muteLocal"> Mute playback here</label>
+    <div id="sinkBox" class="hidden">
+      <label style="justify-content:flex-start">Output device (e.g. a virtual audio cable):</label>
+      <select id="sinkSelect"></select>
+    </div>
+  </div>
+  <p class="warn">Use headphones on the computer, otherwise the phone mic will pick up the speakers and echo.</p>
+  <audio id="remoteAudio" autoplay playsinline></audio>
+</div>
+
+<!-- ============ PHONE / SENDER ============ -->
+<div id="phone" class="card hidden">
+  <h1>📱 Mic Sender</h1>
+  <p>Tap the button, allow microphone access, and keep this screen open.</p>
+  <div class="status"><span class="dot" id="phoneDot"></span><span id="phoneStatus">Ready</span></div>
+  <div class="meter"><div id="phoneMeter"></div></div>
+  <label><input type="checkbox" id="processing" checked> Echo cancel / noise suppression</label>
+  <button id="startMic">🎤 Start Mic</button>
+  <button id="muteBtn" class="secondary hidden">Mute</button>
+  <button id="stopMic" class="stop hidden">Stop</button>
+</div>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const ICE = { iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' }
+  ]};
+
+  function meter(stream, bar) {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = ctx.createMediaStreamSource(stream);
+      const an = ctx.createAnalyser(); an.fftSize = 512;
+      src.connect(an);
+      const buf = new Uint8Array(an.fftSize);
+      (function tick() {
+        an.getByteTimeDomainData(buf);
+        let peak = 0;
+        for (let i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i] - 128));
+        bar.style.width = Math.min(100, peak / 128 * 140) + '%';
+        requestAnimationFrame(tick);
+      })();
+      return ctx;
+    } catch (e) { return null; }
+  }
+
+  const targetId = location.hash.slice(1);
+  if (targetId) initPhone(targetId); else initHost();
+
+  /* ---------------- HOST ---------------- */
+  function initHost() {
+    $('host').classList.remove('hidden');
+    const id = 'wmic-' + Math.random().toString(36).slice(2, 8);
+    const url = location.origin + location.pathname + '#' + id;
+
+    new QRCode($('qr'), { text: url, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+    $('linkText').textContent = url;
+
+    const audio = $('remoteAudio');
+    const peer = new Peer(id, { config: ICE });
+
+    peer.on('open', () => setHost('Waiting for phone…', ''));
+    peer.on('error', e => setHost('Error: ' + e.type, 'bad'));
+    peer.on('disconnected', () => { setHost('Reconnecting…', 'bad'); peer.reconnect(); });
+
+    peer.on('call', call => {
+      call.answer();
+      call.on('stream', stream => {
+        audio.srcObject = stream;
+        $('liveBox').classList.remove('hidden');
+        setHost('Phone connected — live', 'ok');
+        meter(stream, $('meterBar'));
+        audio.play().catch(() => $('enableAudio').classList.remove('hidden'));
+        setupSinks();
+      });
+      call.on('close', () => setHost('Phone disconnected. Waiting…', 'bad'));
+    });
+
+    $('enableAudio').onclick = () => { audio.play(); $('enableAudio').classList.add('hidden'); };
+    $('muteLocal').onchange = e => { audio.muted = e.target.checked; };
+
+    async function setupSinks() {
+      if (!audio.setSinkId || !navigator.mediaDevices.enumerateDevices) return;
+      const outs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
+      if (!outs.length) return;
+      const sel = $('sinkSelect'); sel.innerHTML = '';
+      outs.forEach(d => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || 'Output ' + (sel.length + 1); sel.appendChild(o); });
+      sel.onchange = () => audio.setSinkId(sel.value).catch(console.warn);
+      $('sinkBox').classList.remove('hidden');
+    }
+    function setHost(t, c) { $('hostStatus').textContent = t; $('hostDot').className = 'dot ' + c; }
+  }
+
+  /* ---------------- PHONE ---------------- */
+  function initPhone(hostId) {
+    $('phone').classList.remove('hidden');
+    let stream, peer, call, wake;
+
+    $('startMic').onclick = async () => {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        return setPhone('Mic not available (needs HTTPS).', 'bad');
+      }
+      const p = $('processing').checked;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: p, noiseSuppression: p, autoGainControl: p, channelCount: 1 }
+        });
+      } catch (e) { return setPhone('Mic permission denied', 'bad'); }
+
+      meter(stream, $('phoneMeter'));
+      setPhone('Connecting…', '');
+      peer = new Peer({ config: ICE });
+      peer.on('error', e => setPhone('Error: ' + e.type, 'bad'));
+      peer.on('open', () => {
+        call = peer.call(hostId, stream);
+        call.on('close', () => setPhone('Disconnected', 'bad'));
+        call.on('error', () => setPhone('Call failed', 'bad'));
+        const pc = call.peerConnection;
+        pc.oniceconnectionstatechange = () => {
+          const s = pc.iceConnectionState;
+          if (s === 'connected' || s === 'completed') setPhone('Live — you are on the mic', 'ok');
+          if (s === 'failed') setPhone('Connection failed (network blocks P2P)', 'bad');
+          if (s === 'disconnected') setPhone('Connection lost…', 'bad');
+        };
+      });
+
+      $('startMic').classList.add('hidden');
+      $('muteBtn').classList.remove('hidden');
+      $('stopMic').classList.remove('hidden');
+      try { wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+    };
+
+    $('muteBtn').onclick = () => {
+      const t = stream.getAudioTracks()[0]; t.enabled = !t.enabled;
+      $('muteBtn').textContent = t.enabled ? 'Mute' : 'Unmute';
+    };
+    $('stopMic').onclick = () => {
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      if (peer) peer.destroy();
+      if (wake) wake.release();
+      $('startMic').classList.remove('hidden');
+      $('muteBtn').classList.add('hidden'); $('stopMic').classList.add('hidden');
+      setPhone('Stopped', '');
+    };
+    function setPhone(t, c) { $('phoneStatus').textContent = t; $('phoneDot').className = 'dot ' + c; }
+  }
+})();
+</script>
+</body>
+</html>
