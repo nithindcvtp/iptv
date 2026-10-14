@@ -62,6 +62,14 @@
            background:rgba(255,255,255,.2); backdrop-filter:blur(6px); }
   .round.off { background:#fff; color:#111; }
   .round.hang { background:var(--bad); }
+  .mutebadge { position:absolute; left:14px; top:calc(max(14px,env(safe-area-inset-top)) + 46px); background:rgba(0,0,0,.65);
+               color:#fff; padding:8px 14px; border-radius:999px; font-size:.9rem; font-weight:500; backdrop-filter:blur(6px);
+               border:1px solid rgba(255,92,92,.7); z-index:3; }
+  .pipmute { position:absolute; left:6px; bottom:6px; background:var(--bad); color:#fff; border-radius:999px;
+             font-size:.75rem; padding:3px 8px; z-index:2; }
+  .toast { position:absolute; left:50%; top:calc(max(14px,env(safe-area-inset-top)) + 100px); transform:translateX(-50%);
+           background:rgba(0,0,0,.8); color:#fff; padding:10px 18px; border-radius:12px; font-size:.95rem; z-index:5;
+           max-width:80%; text-align:center; }
   #tapHear { position:absolute; left:50%; transform:translateX(-50%); bottom:120px; width:auto; padding:12px 22px; }
 </style>
 </head>
@@ -114,8 +122,11 @@
   <div class="pip">
     <video id="localVideo" class="mirror" autoplay muted playsinline></video>
     <div class="avatar me hidden" id="avMe">Y</div>
+    <div class="pipmute hidden" id="pipMute">🔇 Muted</div>
   </div>
 
+  <div class="mutebadge hidden" id="remoteMuteBadge">🔇 <span id="remoteMuteText"></span></div>
+  <div class="toast hidden" id="toast"></div>
   <button class="btn hidden" id="tapHear">🔊 Tap to hear</button>
   <div class="controls">
     <button class="round" id="muteBtn" title="Mute">🎤</button>
@@ -195,7 +206,7 @@
   }
 
   function sendState() {
-    if (dataConn && dataConn.open) dataConn.send({ name: myName, cam: !!camTrack });
+    if (dataConn && dataConn.open) dataConn.send({ name: myName, cam: !!camTrack, mic: audioTrack ? audioTrack.enabled : true });
   }
 
   /* ---------- levels ---------- */
@@ -219,11 +230,30 @@
   function setRemoteName(name) {
     name = (name || '').trim() || 'Guest';
     $('nameThem').textContent = name; $('avThem').textContent = name[0].toUpperCase();
+    refreshMuteBadge();
   }
   function setRemoteCam(on) {
     remoteCam = !!on;
     $('remoteVideo').classList.toggle('off', !remoteCam);
     $('remotePh').classList.toggle('hidden', remoteCam);
+  }
+  let remoteMic = true, toastTimer;
+  function showToast(text) {
+    const t = $('toast'); t.textContent = text; t.classList.remove('hidden');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), 3000);
+  }
+  function refreshMuteBadge() {
+    const name = $('nameThem').textContent || 'The other person';
+    $('remoteMuteText').textContent = name + ' is muted';
+    $('remoteMuteBadge').classList.toggle('hidden', remoteMic);
+  }
+  function setRemoteMic(on) {
+    on = !!on;
+    if (on === remoteMic) return;
+    remoteMic = on;
+    refreshMuteBadge();
+    const name = $('nameThem').textContent || 'The other person';
+    showToast(on ? '🎤 ' + name + ' unmuted' : '🔇 ' + name + ' muted the call');
   }
   function setStatus(text, cls) { $('callStatus').textContent = text; $('callDot').className = 'dot ' + cls; }
 
@@ -267,6 +297,7 @@
       if (!d) return;
       if (d.name !== undefined) setRemoteName(d.name);
       if (d.cam !== undefined) setRemoteCam(d.cam);
+      if (d.mic !== undefined) setRemoteMic(d.mic);
     });
     conn.on('close', () => finish('The other person left the call.'));
   }
@@ -307,6 +338,9 @@
     audioTrack.enabled = !audioTrack.enabled;
     $('muteBtn').classList.toggle('off', !audioTrack.enabled);
     $('muteBtn').textContent = audioTrack.enabled ? '🎤' : '🔇';
+    $('pipMute').classList.toggle('hidden', audioTrack.enabled);
+    showToast(audioTrack.enabled ? '🎤 You unmuted' : '🔇 You muted yourself. ' + ($('nameThem').textContent || 'The other person') + ' can see this');
+    sendState();
   };
   $('camBtn').onclick = async () => {
     try {
