@@ -82,10 +82,29 @@
     // Relay fallback (used only when a direct connection is impossible).
     // PeerJS's public TURN servers:
     { urls: 'turn:eu-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
-    { urls: 'turn:us-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' }
-    // For a more reliable setup, add your own TURN server here
-    // (e.g. a free account at metered.ca or Cloudflare Calls).
+    { urls: 'turn:us-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
+    // Public Open Relay (may be rate-limited or unavailable). Includes TCP and TLS on port 443,
+    // which looks like normal HTTPS traffic and passes most firewalls.
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turns:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
   ]};
+
+  // ====== YOUR OWN TURN SERVER (recommended behind a firewall) ======
+  // Free account at https://www.metered.ca/stun-turn gives you a username and password.
+  // Fill these in and the page will use them first.
+  const MY_TURN_USERNAME = '';
+  const MY_TURN_PASSWORD = '';
+  if (MY_TURN_USERNAME) {
+    ICE.iceServers.unshift(
+      { urls: 'turn:relay.metered.ca:80', username: MY_TURN_USERNAME, credential: MY_TURN_PASSWORD },
+      { urls: 'turn:relay.metered.ca:443', username: MY_TURN_USERNAME, credential: MY_TURN_PASSWORD },
+      { urls: 'turn:relay.metered.ca:443?transport=tcp', username: MY_TURN_USERNAME, credential: MY_TURN_PASSWORD },
+      { urls: 'turns:relay.metered.ca:443?transport=tcp', username: MY_TURN_USERNAME, credential: MY_TURN_PASSWORD }
+    );
+  }
+
 
   function meter(stream, bar) {
     try {
