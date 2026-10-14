@@ -337,7 +337,7 @@
     const pc = c.peerConnection; if (!pc) return;
     pc.oniceconnectionstatechange = () => {
       const s = pc.iceConnectionState;
-      if (s === 'failed') setStatus('Connection failed. Add your own relay in config.js', 'bad');
+      if (s === 'failed') setStatus('Connection failed. Run nettest.html, then add your own relay in config.js', 'bad');
       else if (s === 'disconnected') setStatus('Connection lost…', 'bad');
       else if (s === 'connected' || s === 'completed') { setStatus('Connected', 'ok'); capBitrate(); }
     };
