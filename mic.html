@@ -78,7 +78,13 @@
   const $ = id => document.getElementById(id);
   const ICE = { iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
+    { urls: 'stun:stun1.l.google.com:19302' },
+    // Relay fallback (used only when a direct connection is impossible).
+    // PeerJS's public TURN servers:
+    { urls: 'turn:eu-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
+    { urls: 'turn:us-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' }
+    // For a more reliable setup, add your own TURN server here
+    // (e.g. a free account at metered.ca or Cloudflare Calls).
   ]};
 
   function meter(stream, bar) {
