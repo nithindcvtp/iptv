@@ -156,6 +156,7 @@
   let micStream, audioTrack, camTrack = null, blackTrack, sendStream, facing = 'user', remoteCam = false;
   const preview = new MediaStream();
   const ctxs = [];
+  let camNote = '';
 
   /* ---------- media ---------- */
   function makeBlackTrack() {
@@ -173,7 +174,8 @@
         const s = await navigator.mediaDevices.getUserMedia({ audio, video: camConstraints(facing) });
         micStream = s; audioTrack = s.getAudioTracks()[0]; camTrack = s.getVideoTracks()[0];
       } catch (e) {
-        note = 'Camera unavailable, joining with audio only.';
+        note = 'Camera unavailable (' + ((e && e.name) || 'error') + '). Check the browser camera permission. Continuing with audio only.';
+        camNote = note;
       }
     }
     if (!micStream) {
@@ -232,15 +234,16 @@
     $('nameThem').textContent = name; $('avThem').textContent = name[0].toUpperCase();
     refreshMuteBadge();
   }
+  function checkRemoteVideo() { setRemoteCam($('remoteVideo').videoWidth > 32); }
   function setRemoteCam(on) {
     remoteCam = !!on;
     $('remoteVideo').classList.toggle('off', !remoteCam);
     $('remotePh').classList.toggle('hidden', remoteCam);
   }
   let remoteMic = true, toastTimer;
-  function showToast(text) {
+  function showToast(text, ms) {
     const t = $('toast'); t.textContent = text; t.classList.remove('hidden');
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), 3000);
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), ms || 3000);
   }
   function refreshMuteBadge() {
     const name = $('nameThem').textContent || 'The other person';
@@ -262,6 +265,7 @@
     $('avMe').textContent = (myName[0] || 'Y').toUpperCase();
     refreshPreview();
     level(new MediaStream([audioTrack]), $('avMe'));
+    if (camNote) showToast(camNote, 9000);
     setStatus('Connecting…', 'wait');
     try { navigator.wakeLock && navigator.wakeLock.request('screen').then(w => wake = w).catch(() => {}); } catch (e) {}
   }
@@ -270,6 +274,8 @@
     if (started) return; started = true;
     const v = $('remoteVideo');
     v.srcObject = stream;
+    ['resize', 'loadedmetadata', 'playing'].forEach(ev => v.addEventListener(ev, checkRemoteVideo));
+    const poll = setInterval(() => { if (ended) clearInterval(poll); else checkRemoteVideo(); }, 1000);
     v.play().catch(() => $('tapHear').classList.remove('hidden'));
     level(stream, $('avThem'));
     setStatus('Connected', 'ok');
@@ -296,7 +302,6 @@
     conn.on('data', d => {
       if (!d) return;
       if (d.name !== undefined) setRemoteName(d.name);
-      if (d.cam !== undefined) setRemoteCam(d.cam);
       if (d.mic !== undefined) setRemoteMic(d.mic);
     });
     conn.on('close', () => finish('The other person left the call.'));
@@ -352,7 +357,7 @@
         camTrack = s.getVideoTracks()[0];
         await swapVideo(camTrack);
       }
-    } catch (e) { setStatus('Could not access the camera', 'bad'); }
+    } catch (e) { setStatus('Could not access the camera', 'bad'); showToast('Camera error: ' + ((e && e.name) || 'unknown'), 6000); }
     refreshPreview(); sendState();
   };
   $('flipBtn').onclick = async () => {
