@@ -62,6 +62,7 @@
            background:rgba(255,255,255,.2); backdrop-filter:blur(6px); }
   .round.off { background:#fff; color:#111; }
   .round.hang { background:var(--bad); }
+  .net { position:absolute; left:14px; bottom:98px; font-size:.72rem; color:#cfd3e0; z-index:2; text-shadow:0 1px 2px #000; }
   .mutebadge { position:absolute; left:14px; top:calc(max(14px,env(safe-area-inset-top)) + 46px); background:rgba(0,0,0,.65);
                color:#fff; padding:8px 14px; border-radius:999px; font-size:.9rem; font-weight:500; backdrop-filter:blur(6px);
                border:1px solid rgba(255,92,92,.7); z-index:3; }
@@ -125,6 +126,7 @@
     <div class="pipmute hidden" id="pipMute">🔇 Muted</div>
   </div>
 
+  <div class="net" id="netInfo"></div>
   <div class="mutebadge hidden" id="remoteMuteBadge">🔇 <span id="remoteMuteText"></span></div>
   <div class="toast hidden" id="toast"></div>
   <button class="btn hidden" id="tapHear">🔊 Tap to hear</button>
@@ -164,7 +166,7 @@
     const g = c.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, 16, 16);
     const t = c.captureStream(1).getVideoTracks()[0]; t.enabled = true; return t;
   }
-  const camConstraints = f => ({ facingMode: { ideal: f }, width: { ideal: 640 }, height: { ideal: 480 } });
+  const camConstraints = f => ({ facingMode: { ideal: f }, width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 24, max: 30 } });
 
   async function getMedia(wantCam) {
     const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 };
@@ -270,10 +272,55 @@
     try { navigator.wakeLock && navigator.wakeLock.request('screen').then(w => wake = w).catch(() => {}); } catch (e) {}
   }
 
+  function reattach(stream) {
+    const v = $('remoteVideo');
+    v.srcObject = null; v.srcObject = stream;
+    v.play().catch(() => $('tapHear').classList.remove('hidden'));
+  }
+
+  async function updateStats() {
+    const pc = call && call.peerConnection; if (!pc) return;
+    try {
+      const stats = await pc.getStats();
+      let pairId = null, vin = null, pair = null;
+      stats.forEach(r => {
+        if (r.type === 'transport' && r.selectedCandidatePairId) pairId = r.selectedCandidatePairId;
+        if (r.type === 'inbound-rtp' && (r.kind === 'video' || r.mediaType === 'video')) vin = r;
+      });
+      if (pairId) pair = stats.get(pairId);
+      if (!pair) stats.forEach(r => { if (r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') pair = r; });
+      let route = '';
+      if (pair) {
+        const l = stats.get(pair.localCandidateId), rm = stats.get(pair.remoteCandidateId);
+        route = ((l && l.candidateType === 'relay') || (rm && rm.candidateType === 'relay')) ? ' · via relay' : ' · direct';
+      }
+      let v = 'no video stream';
+      if (vin) v = vin.framesDecoded ? 'video ' + (vin.frameWidth || '?') + '×' + (vin.frameHeight || '?') : 'waiting for video frames';
+      $('netInfo').textContent = '↓ ' + v + route;
+    } catch (e) {}
+  }
+
+  async function capBitrate() {
+    const pc = call && call.peerConnection; if (!pc) return;
+    for (const snd of pc.getSenders()) {
+      if (snd.track && snd.track.kind === 'video') {
+        try {
+          const p = snd.getParameters();
+          if (!p.encodings || !p.encodings.length) p.encodings = [{}];
+          p.encodings[0].maxBitrate = 500000;
+          await snd.setParameters(p);
+        } catch (e) {}
+      }
+    }
+  }
+
   function onRemote(stream) {
-    if (started) return; started = true;
+    if (started) { reattach(stream); return; }   // another track (the video) arrived on the same stream
+    started = true;
     const v = $('remoteVideo');
     v.srcObject = stream;
+    stream.addEventListener('addtrack', () => reattach(stream));
+    const st = setInterval(() => { if (ended) clearInterval(st); else updateStats(); }, 2000);
     ['resize', 'loadedmetadata', 'playing'].forEach(ev => v.addEventListener(ev, checkRemoteVideo));
     const poll = setInterval(() => { if (ended) clearInterval(poll); else checkRemoteVideo(); }, 1000);
     v.play().catch(() => $('tapHear').classList.remove('hidden'));
@@ -292,7 +339,7 @@
       const s = pc.iceConnectionState;
       if (s === 'failed') setStatus('Connection failed. Add your own relay in config.js', 'bad');
       else if (s === 'disconnected') setStatus('Connection lost…', 'bad');
-      else if (s === 'connected' || s === 'completed') setStatus('Connected', 'ok');
+      else if (s === 'connected' || s === 'completed') { setStatus('Connected', 'ok'); capBitrate(); }
     };
   }
 
