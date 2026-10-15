@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Handoff – send a folder to a nearby device</title>
+<style>
+:root{--bg:#eef1ea;--ink:#13261d;--mute:#5d6f64;--card:#fff;--line:#d3dacf;--acc:#2447ff;--accInk:#fff;--ok:#0b8a4f;--bad:#c62828}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1713;--ink:#e6efe8;--mute:#8da396;--card:#18231d;--line:#2a3a31;--acc:#7b94ff;--accInk:#0b1020;--ok:#4ade80;--bad:#ff7b7b}}
+*{box-sizing:border-box;margin:0}
+body{font:16px/1.5 ui-rounded,"SF Pro Rounded","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);min-height:100dvh;padding:max(20px,env(safe-area-inset-top)) 20px max(28px,env(safe-area-inset-bottom))}
+main{max-width:520px;margin:0 auto}
+h1{font-size:34px;letter-spacing:-.03em;line-height:1.1;margin:18px 0 6px}
+h2{font-size:20px;margin-bottom:8px}
+p{color:var(--mute)}
+[hidden]{display:none!important}
+.big{display:flex;flex-direction:column;align-items:flex-start;gap:4px;width:100%;text-align:left;margin-top:14px;padding:20px;border-radius:20px;border:2px solid var(--ink);background:var(--card);color:var(--ink);font:inherit;cursor:pointer}
+.big b{font-size:22px}.big span{color:var(--mute);font-size:15px}
+.big.go{background:var(--acc);color:var(--accInk);border-color:var(--acc)}.big.go span{color:inherit;opacity:.85}
+button,input{font:inherit}
+.btn{min-height:48px;padding:0 20px;border-radius:14px;border:2px solid var(--ink);background:var(--card);color:var(--ink);cursor:pointer;font-weight:600}
+a.btn{display:inline-flex;align-items:center;text-decoration:none}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:var(--accInk)}
+.btn:focus-visible,.big:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.row{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+.back{background:none;border:0;color:var(--mute);padding:8px 0;cursor:pointer}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px;margin-top:16px}
+#qr{width:min(100%,300px);margin:0 auto;display:block;border-radius:12px;overflow:hidden;border:6px solid #fff}
+.code{font:700 30px/1 ui-monospace,Consolas,monospace;letter-spacing:.12em;text-align:center;margin:14px 0 4px}
+.link{width:100%;height:44px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:0 10px;font-size:13px}
+input.codein{width:100%;height:56px;border-radius:14px;border:2px solid var(--ink);background:var(--card);color:var(--ink);text-align:center;font:700 26px ui-monospace,Consolas,monospace;letter-spacing:.12em;text-transform:uppercase}
+.bar{height:10px;border-radius:5px;background:var(--line);overflow:hidden;margin:8px 0}.bar i{display:block;height:100%;width:0;background:var(--acc)}
+.msg{margin-top:12px;font-weight:600}.msg.err{color:var(--bad)}.msg.ok{color:var(--ok)}
+.conn{padding:10px 0;border-top:1px solid var(--line);font-size:15px}.conn:first-child{border-top:0}
+ul.files{list-style:none;padding:0;max-height:210px;overflow:auto;font-size:14px}
+ul.files li{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)}
+ul.files li span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ul.files li a{color:var(--acc);font-weight:600;cursor:pointer}
+dialog{border:0;border-radius:22px;padding:24px;width:min(92vw,480px);background:var(--card);color:var(--ink)}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+dialog ol{padding-left:20px;margin:12px 0 16px}dialog li{margin:8px 0}
+</style>
+</head>
+<body>
+<dialog id="intro">
+  <h2>Before you start</h2>
+  <ol>
+    <li>Connect both devices to the internet. They can be on <b>different networks</b>. If a direct link fails, use the same Wi-Fi or a phone hotspot.</li>
+    <li>Open this page on <b>both</b> devices.</li>
+    <li>On the sending device, tap <b>Send</b> and choose a folder or files. A QR code appears.</li>
+    <li>Scan it with the other device's camera, or type the code, then tap <b>Download</b>.</li>
+  </ol>
+  <p>Files go straight from device to device (or through an encrypted relay if needed), never stored on a server. Keep this page open until it finishes.</p>
+  <div class="row"><button class="btn pri" id="introOk">OK, got it</button></div>
+</dialog>
+
+<main>
+<section id="home" class="scr">
+  <h1>Handoff</h1>
+  <p>Send a folder to a phone or computer nearby or far away, with no cables, accounts or uploads.</p>
+  <button class="big go" id="goSend"><b>Send</b><span>Share a folder or files from this device</span></button>
+  <button class="big" id="goRecv"><b>Receive</b><span>Get files from another device</span></button>
+</section>
+
+<section id="send" class="scr" hidden>
+  <button class="back" data-home>← Back</button>
+  <h1>Send</h1>
+  <div id="pick">
+    <p>Choose what to share. A folder keeps its structure on the other side.</p>
+    <div class="row">
+      <button class="btn pri" id="pickDir">Choose folder</button>
+      <button class="btn" id="pickFiles">Choose files</button>
+    </div>
+    <p style="margin-top:10px;font-size:14px">Phones usually can't pick folders. Choose files there instead.</p>
+    <input type="file" id="inDir" webkitdirectory multiple hidden>
+    <input type="file" id="inFiles" multiple hidden>
+  </div>
+  <div id="share" hidden>
+    <div class="card">
+      <div id="qr"></div>
+      <div class="code" id="code"></div>
+      <p style="text-align:center" id="summary"></p>
+      <div class="row"><input class="link" id="link" readonly><button class="btn" id="copy">Copy link</button></div>
+      <div class="row">
+        <button class="btn pri" id="shareNative" hidden>Share…</button>
+        <a class="btn" id="wa" target="_blank" rel="noopener">WhatsApp</a>
+        <a class="btn" id="mail">Email</a>
+      </div>
+      <p style="font-size:14px;margin-top:10px">After sending the link, switch back to this page and keep it open. The receiver's page keeps retrying until you're back.</p>
+    </div>
+    <div class="card" id="conns"><p>Waiting for a device to scan the code…</p></div>
+  </div>
+  <p class="msg err" id="sendErr"></p>
+</section>
+
+<section id="recv" class="scr" hidden>
+  <button class="back" data-home>← Back</button>
+  <h1>Receive</h1>
+  <div id="enter">
+    <p>Scan the sender's QR code with your camera, or type the code shown under it.</p>
+    <div class="row"><input class="codein" id="codeIn" maxlength="9" placeholder="XXXX-XXXX" autocomplete="off" autocapitalize="characters"></div>
+    <div class="row"><button class="btn pri" id="join">Connect</button></div>
+  </div>
+  <div id="got" class="card" hidden>
+    <h2 id="gotTitle"></h2>
+    <ul class="files" id="gotList"></ul>
+    <div class="row"><button class="btn pri" id="dl">Download</button><button class="btn" id="dlZip">Download as ZIP</button></div>
+    <p style="font-size:14px;margin-top:8px">On a computer, <b>Download</b> opens a folder window: click <b>New folder</b>, name it, open it, then choose <b>Select Folder</b>. Or use <b>Download as ZIP</b>, which goes to your Downloads folder automatically.</p>
+    <div class="bar" hidden><i id="barI"></i></div>
+    <p id="prog"></p>
+  </div>
+  <div id="saved" class="card" hidden><h2 id="savedH">Your files</h2><ul class="files" id="savedList"></ul><div class="row"><button class="btn pri" id="zip" hidden>Save all as ZIP</button></div></div>
+  <div class="card" id="where" hidden><h2>Where are my files?</h2><p id="whereTxt"></p></div>
+  <p class="msg" id="rmsg"></p>
+</section>
+</main>
+
+<!-- Libraries (pinned versions). To go fully offline, host these two files yourself. -->
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script>
+"use strict";
+
+/* ---------- connection config ---------- */
+// Add your own TURN server here for best reliability (see notes). Leave empty to use only the public ones.
+const MY_TURN = [
+  // { urls: ["turn:YOUR_HOST:443?transport=tcp", "turns:YOUR_HOST:443?transport=tcp"],
+  //   username: "USER", credential: "PASS" },
+];
+const PEER_OPTS = {
+  debug: 1,
+  pingInterval: 5000,
+  config: {
+    sdpSemantics: "unified-plan",
+    iceCandidatePoolSize: 4,
+    iceServers: [
+      { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:global.stun.twilio.com:3478"] },
+      { urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478"], username: "peerjs", credential: "peerjsp" },
+      ...MY_TURN
+    ]
+  }
+};
+
+const $ = s => document.querySelector(s), PRE = "handoff-", CH = 16384;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let wantAwake = false;
+async function keepAwake() { wantAwake = true; try { if (navigator.wakeLock) await navigator.wakeLock.request("screen"); } catch (e) {} }
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  if (wantAwake) keepAwake();
+  if (sPeer && !$("#share").hidden) { if (sPeer.destroyed) share(myCode); else if (sPeer.disconnected) sPeer.reconnect(); }
+});
+const send = (c, o) => c.send(JSON.stringify(o));
+const fmt = n => { const u = ["B","KB","MB","GB"]; let i = 0; while (n >= 1024 && i < 3) { n /= 1024; i++; } return (i ? n.toFixed(1) : n) + " " + u[i]; };
+const dev = () => /iPhone|iPad/.test(navigator.userAgent) ? "iPhone/iPad" : /Android/.test(navigator.userAgent) ? "Android device" : "computer";
+const show = id => document.querySelectorAll(".scr").forEach(s => s.hidden = s.id !== id);
+const PeerC = window.Peer || (window.peerjs && window.peerjs.Peer);
+document.querySelectorAll("[data-home]").forEach(b => b.onclick = () => { try { sessionStorage.removeItem("handoffCode"); } catch (e) {} location.href = location.pathname; });
+const newCode = () => { const A = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; return Array.from(crypto.getRandomValues(new Uint8Array(8)), b => A[b % A.length]).join(""); };
+const pretty = c => c.slice(0, 4) + "-" + c.slice(4);
+
+// Reports whether the connection is direct or relayed through TURN
+async function linkType(c) {
+  try {
+    const stats = await c.peerConnection.getStats();
+    let pair; stats.forEach(s => { if (s.type === "candidate-pair" && s.nominated && s.state === "succeeded") pair = s; });
+    const rc = pair && stats.get(pair.remoteCandidateId);
+    return rc && (rc.candidateType === "relay" ? "relayed" : "direct");
+  } catch (e) {}
+}
+
+/* ---------- send ---------- */
+let files = [];
+$("#goSend").onclick = () => show("send");
+$("#goRecv").onclick = () => show("recv");
+$("#pickDir").onclick = () => $("#inDir").click();
+$("#pickFiles").onclick = () => $("#inFiles").click();
+[$("#inDir"), $("#inFiles")].forEach(i => i.onchange = () => {
+  files = [...i.files].map(f => ({ f, path: f.webkitRelativePath || f.name }));
+  if (files.length) share();
+});
+function qrSvg(t) {
+  const q = qrcode(0, "M"); q.addData(t); q.make();
+  const n = q.getModuleCount(), m = 3; let d = "";
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) d += `M${c + m} ${r + m}h1v1h-1z`;
+  return `<svg viewBox="0 0 ${n + 2 * m} ${n + 2 * m}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+let sPeer = null, myCode = null;
+function share(code, tries = 0) {
+  keepAwake();
+  code = code || sessionStorage.getItem("handoffCode") || newCode(); myCode = code;
+  try { sessionStorage.setItem("handoffCode", code); } catch (e) {}
+  const total = files.reduce((a, x) => a + x.f.size, 0);
+  const peer = sPeer = new PeerC(PRE + code, PEER_OPTS);
+  peer.on("open", () => {
+    const url = location.origin + location.pathname + "#join=" + code;
+    $("#qr").innerHTML = qrSvg(url); $("#code").textContent = pretty(code); $("#link").value = url;
+    $("#summary").textContent = `${files.length} file${files.length > 1 ? "s" : ""} · ${fmt(total)}`;
+    const txt = "Open this link to receive my files with Handoff. If it says it can't connect, wait a few seconds and try again: ";
+    $("#wa").href = "https://wa.me/?text=" + encodeURIComponent(txt + url);
+    $("#mail").href = "mailto:?subject=" + encodeURIComponent("Files for you (Handoff)") + "&body=" + encodeURIComponent(txt + url);
+    if (navigator.share) { $("#shareNative").hidden = false; $("#shareNative").onclick = () => navigator.share({ title: "Handoff", text: txt, url }).catch(() => {}); }
+    $("#pick").hidden = true; $("#share").hidden = false; $("#sendErr").textContent = "";
+  });
+  peer.on("connection", c => serve(c, total));
+  peer.on("disconnected", () => { if (!peer.destroyed) peer.reconnect(); });
+  peer.on("error", e => {
+    if (e.type === "unavailable-id") {
+      peer.destroy();
+      if (tries < 8) return setTimeout(() => share(code, tries + 1), 2000);
+      try { sessionStorage.removeItem("handoffCode"); } catch (x) {}
+      return share(newCode());
+    }
+    $("#sendErr").textContent = "Couldn't reach the connection service (" + e.type + "). Check your internet and try again.";
+  });
+}
+$("#copy").onclick = () => { $("#link").select(); navigator.clipboard && navigator.clipboard.writeText($("#link").value); $("#copy").textContent = "Copied"; };
+function serve(c, total) {
+  const box = $("#conns"); if (box.querySelector("p")) box.innerHTML = "";
+  const row = document.createElement("div"); row.className = "conn"; row.innerHTML = "<div>Device connected…</div><div class='bar'><i></i></div>";
+  box.appendChild(row);
+  const say = t => row.firstChild.textContent = t, bar = row.querySelector("i");
+  let stop = false, link = "";
+  c.on("error", e => say("Connection problem (" + (e.type || e) + ")"));
+  c.on("data", async d => {
+    const m = JSON.parse(d);
+    if (m.t === "join") {
+      linkType(c).then(t => { if (t) link = " (" + t + ")"; });
+      if (!confirm(`A ${m.dev} wants to receive ${files.length} file(s), ${fmt(total)}. Allow?`)) { send(c, { t: "no" }); say("Declined"); setTimeout(() => c.close(), 400); return; }
+      say("Waiting for " + m.dev + " to tap Download…");
+      send(c, { t: "list", files: files.map(x => [x.path, x.f.size]) });
+    } else if (m.t === "start") stream();
+    else if (m.t === "stop") { stop = true; say("Cancelled by receiver"); }
+  });
+  c.on("close", () => { if (!bar.style.width.startsWith("100")) say("Disconnected"); });
+  async function stream() {
+    let sent = 0; say("Sending" + link + "…");
+    for (let i = 0; i < files.length && !stop; i++) {
+      send(c, { t: "file", i });
+      const f = files[i].f;
+      for (let o = 0; o < f.size && !stop; o += 1 << 20) {
+        const buf = await f.slice(o, o + (1 << 20)).arrayBuffer();
+        for (let p = 0; p < buf.byteLength && !stop; p += CH) {
+          while (c.dataChannel.bufferedAmount > 4e6) await sleep(15);
+          c.send(buf.slice(p, p + CH)); sent += Math.min(CH, buf.byteLength - p);
+          bar.style.width = (sent / total * 100) + "%";
+        }
+      }
+      send(c, { t: "eof", i });
+    }
+    if (!stop) { send(c, { t: "done" }); say("Sent ✓ " + fmt(total) + link); }
+  }
+}
+window.addEventListener("beforeunload", e => { if ($("#conns").querySelector(".conn") && !$("#share").hidden) { e.preventDefault(); e.returnValue = ""; } });
+
+/* ---------- receive ---------- */
+const T = new Uint32Array(256).map((_, n) => { for (let k = 0; k < 8; k++) n = n & 1 ? 0xEDB88320 ^ (n >>> 1) : n >>> 1; return n >>> 0; });
+const crc32 = (b, c = 0) => { c = ~c; for (let i = 0; i < b.length; i++) c = T[(c ^ b[i]) & 255] ^ (c >>> 8); return ~c >>> 0; };
+const clean = s => s.replace(/[<>:"\\|?*\x00-\x1f]/g, "_");
+let list = [], cur = null, dir = null, saved = [], got = 0, totalIn = 0, rconn = null, finished = false, t0 = 0;
+const rmsg = (t, k = "") => { const m = $("#rmsg"); m.textContent = t; m.className = "msg " + k; };
+$("#join").onclick = () => connect($("#codeIn").value.replace(/[^A-Za-z0-9]/g, "").toUpperCase());
+$("#codeIn").oninput = e => { const v = e.target.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 8); e.target.value = v.length > 4 ? pretty(v) : v; };
+function connect(code, n = 0) {
+  if (code.length !== 8) return rmsg("Enter the 8-character code.", "err");
+  show("recv"); keepAwake(); rmsg(n ? `Waiting for the sender's screen… (${n}/10)` : "Connecting…");
+  const peer = new PeerC(undefined, PEER_OPTS);
+  peer.on("error", e => {
+    if (e.type === "peer-unavailable" && n < 10) { peer.destroy(); return setTimeout(() => connect(code, n + 1), 3000); }
+    rmsg(e.type === "peer-unavailable" ? "Code not found. Check it, and make sure the sender's page is still open." : "Connection failed (" + e.type + ").", "err");
+  });
+  peer.on("open", () => {
+    const c = rconn = peer.connect(PRE + code, { reliable: true, serialization: "raw" });
+    let q = Promise.resolve();
+    const timer = setTimeout(() => {
+      if (!c.open) rmsg("Couldn't make a direct link. One of the networks may be blocking peer-to-peer traffic. Try the same Wi-Fi or hotspot.", "err");
+    }, 25000);
+    c.on("open", () => {
+      clearTimeout(timer); send(c, { t: "join", dev: dev() });
+      rmsg("Waiting for the sender to allow this device…");
+      linkType(c).then(t => t && console.log("Link:", t));
+    });
+    c.on("error", e => rmsg("Connection failed (" + (e.type || e) + "). Try again.", "err"));
+    c.on("data", d => { q = q.then(() => onData(d)).catch(e => rmsg("Error: " + e.message, "err")); });
+    c.on("close", () => { clearTimeout(timer); if (!finished) rmsg("Connection closed.", "err"); });
+  });
+}
+async function onData(d) {
+  if (typeof d !== "string") { const b = new Uint8Array(d); await cur.write(b); got += b.length; prog(); return; }
+  const m = JSON.parse(d);
+  if (m.t === "no") rmsg("The sender declined.", "err");
+  else if (m.t === "list") {
+    list = m.files; totalIn = list.reduce((a, x) => a + x[1], 0); rmsg("");
+    $("#enter").hidden = true; $("#got").hidden = false;
+    $("#gotTitle").textContent = `${list.length} file${list.length > 1 ? "s" : ""} · ${fmt(totalIn)}`;
+    $("#gotList").innerHTML = ""; list.forEach(x => { const li = document.createElement("li"); li.innerHTML = "<span></span><span></span>"; li.firstChild.textContent = x[0]; li.lastChild.textContent = fmt(x[1]); $("#gotList").appendChild(li); });
+  } else if (m.t === "file") await openSink(m.i);
+  else if (m.t === "eof") await cur.close();
+  else if (m.t === "done") { finished = true; $("#dl").hidden = $("#dlZip").hidden = true; rmsg(dir ? "Saved to your folder ✓" : "Done ✓ Save your files below.", "ok"); offer(); }
+}
+function prog() {
+  $("#barI").style.width = (got / (totalIn || 1) * 100) + "%";
+  $("#prog").textContent = `${fmt(got)} of ${fmt(totalIn)} · ${fmt(got / ((Date.now() - t0) / 1000 || 1))}/s`;
+}
+$("#dlZip").onclick = () => begin(false);
+$("#dl").onclick = () => begin(true);
+async function begin(useFolder) {
+  dir = null;
+  if (useFolder && window.showDirectoryPicker) {
+    try { dir = await showDirectoryPicker({ mode: "readwrite", id: "handoff", startIn: "downloads" }); }
+    catch (e) {
+      if (e.name === "AbortError") return;
+      rmsg("The browser blocks that folder (Desktop, Downloads and Documents are protected). Saving as a ZIP instead. Next time, create a new folder inside Desktop and pick that.");
+    }
+  }
+  $("#dl").disabled = $("#dlZip").disabled = true; document.querySelector("#got .bar").hidden = false; t0 = Date.now(); got = 0;
+  send(rconn, { t: "start" });
+}
+async function openSink(i) {
+  const path = list[i][0];
+  if (dir) {
+    const parts = path.split("/").map(clean).filter(Boolean); let d = dir;
+    for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p, { create: true });
+    const fh = await d.getFileHandle(parts.at(-1), { create: true }), w = await fh.createWritable();
+    cur = { write: c => w.write(c), close: async () => { await w.close(); saved.push({ path, fh }); } };
+  } else {
+    const chunks = []; let crc = 0, size = 0;
+    cur = { write: c => { chunks.push(c); crc = crc32(c, crc); size += c.length; }, close: async () => { saved.push({ path, blob: new Blob(chunks), crc, size }); } };
+  }
+}
+function save(blob, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000); }
+function offer() {
+  $("#saved").hidden = false; $("#savedH").textContent = dir ? "Saved files" : "Ready to save";
+  const ul = $("#savedList"); ul.innerHTML = "";
+  saved.forEach(x => {
+    const li = document.createElement("li"); li.innerHTML = "<span></span><span><a>Open</a>" + (x.blob ? " &nbsp; <a>Save</a>" : "") + "</span>";
+    li.firstChild.textContent = x.path; const a = li.querySelectorAll("a");
+    a[0].onclick = async () => window.open(URL.createObjectURL(x.blob || await x.fh.getFile()), "_blank");
+    if (x.blob) a[1].onclick = () => save(x.blob, x.path.split("/").pop());
+    ul.appendChild(li);
+  });
+  if (!dir && saved.length > 1) { $("#zip").hidden = false; $("#zip").onclick = () => save(zip(saved), "handoff.zip"); }
+  $("#whereTxt").textContent = where(); $("#where").hidden = false;
+}
+function where() {
+  const ua = navigator.userAgent;
+  if (dir) return `Your files are in the folder you chose (“${dir.name}”). Open File Explorer or Finder and go to that folder.`;
+  if (/iPhone|iPad/.test(ua)) return "Open the Files app and look in Downloads, or tap the download arrow in Safari's toolbar. Tap a ZIP to open it.";
+  if (/Android/.test(ua)) return "Open the Files app and look in Downloads, or tap ⋮ in Chrome, then Downloads. Tap a ZIP to extract it.";
+  if (/Mac/.test(ua)) return "Press ⌘ + Shift + J (Chrome or Edge), or click the Downloads arrow in Safari, then use the magnifier icon to show the file in Finder.";
+  return "Press Ctrl + J to open your downloads list, then click Show in folder. Right-click a ZIP and choose Extract All.";
+}
+function zip(items) {
+  const enc = new TextEncoder(), parts = [], cd = [], d = new Date(); let off = 0;
+  const tm = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), dt = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  for (const it of items) {
+    const n = enc.encode(it.path), h = new DataView(new ArrayBuffer(30)), c = new DataView(new ArrayBuffer(46));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x800, true); h.setUint16(10, tm, true); h.setUint16(12, dt, true);
+    h.setUint32(14, it.crc, true); h.setUint32(18, it.size, true); h.setUint32(22, it.size, true); h.setUint16(26, n.length, true);
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x800, true); c.setUint16(12, tm, true); c.setUint16(14, dt, true);
+    c.setUint32(16, it.crc, true); c.setUint32(20, it.size, true); c.setUint32(24, it.size, true); c.setUint16(28, n.length, true); c.setUint32(42, off, true);
+    parts.push(h.buffer, n, it.blob); cd.push(c.buffer, n); off += 30 + n.length + it.size;
+  }
+  const cdSize = cd.reduce((a, b) => a + (b.byteLength || b.length), 0), e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, items.length, true); e.setUint16(10, items.length, true); e.setUint32(12, cdSize, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...cd, e.buffer], { type: "application/zip" });
+}
+
+/* ---------- start ---------- */
+if (!PeerC) { document.body.insertAdjacentHTML("afterbegin", "<p class='msg err' style='text-align:center'>Couldn't load the PeerJS library. Check your internet connection and reload.</p>"); }
+const m = location.hash.match(/join=([A-Za-z0-9]{8})/);
+if (m) { show("recv"); connect(m[1].toUpperCase()); }
+else { show("home"); $("#intro").showModal(); }
+$("#introOk").onclick = () => $("#intro").close();
+</script>
+</body>
+</html>
