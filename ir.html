@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IPTV Remote</title>
+<style>
+body{margin:0;background:#0b1020;color:#f4f7ff;font:16px system-ui;padding:18px}
+h1{font-size:24px}input{width:100%;box-sizing:border-box;padding:12px;border-radius:9px;background:#18233b;color:white;border:1px solid #344363}
+#list{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;margin-top:14px}
+button{padding:12px;text-align:left;background:#1b2945;color:white;border:1px solid #344363;border-radius:10px;cursor:pointer}
+small{display:block;color:#aab6d3;margin-top:5px}
+#status{color:#8dd5ff;margin:12px 0}
+</style>
+<h1>📺 IPTV Remote</h1>
+<p>Choose a channel to switch the TV page.</p>
+<input id="search" placeholder="Search channels…">
+<div id="status">Loading channel list…</div><div id="list"></div>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "PASTE_API_KEY",
+  authDomain: "PASTE_PROJECT.firebaseapp.com",
+  databaseURL: "https://PASTE_PROJECT-default-rtdb.firebaseio.com",
+  projectId: "PASTE_PROJECT",
+  appId: "PASTE_APP_ID"
+};
+firebase.initializeApp(firebaseConfig);
+const db=firebase.database();
+let channels=[];
+async function load(){
+ try{
+   // Put this remote.html beside iptv_tv_remote_ready.html on your GitHub Pages site.
+   const r=await fetch("./iptv_tv_remote_ready.html");
+   const html=await r.text();
+   const match=html.match(/const channels = (\\[.*?\\]);\\s*\\n/s);
+   if(!match) throw Error("Could not read channels from TV page.");
+   channels=JSON.parse(match[1]); render();
+   document.getElementById("status").textContent=channels.length+" channels loaded. TV must have the TV page open.";
+ }catch(e){document.getElementById("status").textContent="Load error: "+e.message;}
+}
+function render(){
+ const term=document.getElementById("search").value.toLowerCase();
+ const list=document.getElementById("list");list.innerHTML="";
+ channels.filter(c=>c.name.toLowerCase().includes(term)).slice(0,400).forEach(c=>{
+  const b=document.createElement("button");b.textContent=c.name;
+  const small=document.createElement("small");small.textContent=(c.quality||"")+" · "+(c.language||"");
+  b.appendChild(small);
+  b.onclick=async()=>{try{await db.ref("iptv/selected").set({url:c.url,name:c.name,at:Date.now()});
+    document.getElementById("status").textContent="Sent to TV: "+c.name;
+  }catch(e){document.getElementById("status").textContent="Firebase error: "+e.message;}};
+  list.appendChild(b);
+ });
+}
+document.getElementById("search").addEventListener("input",render);
+load();
+</script></html>
