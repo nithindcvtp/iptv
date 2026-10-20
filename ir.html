@@ -38,9 +38,18 @@ function render(){
   const b=document.createElement("button");b.textContent=c.name;
   const small=document.createElement("small");small.textContent=(c.quality||"")+" · "+(c.language||"");
   b.appendChild(small);
-  b.onclick=async()=>{try{if(!db) throw Error("Firebase config is not set up yet."); await db.ref("iptv/selected").set({url:c.url,name:c.name,at:Date.now()});
-    document.getElementById("status").textContent="Sent to TV: "+c.name;
-  }catch(e){document.getElementById("status").textContent="Firebase error: "+e.message;}};
+  b.onclick=async()=>{
+    const status=document.getElementById("status");
+    status.textContent="Clicked: "+c.name+" — checking connection…";
+    try{
+      if(!db) throw Error("Firebase is not configured. Add your Firebase web config to this remote page and the TV page.");
+      await db.ref("iptv/selected").set({url:c.url,name:c.name,at:Date.now()});
+      status.textContent="Sent to TV: "+c.name;
+    }catch(e){
+      status.textContent="Click received, but not sent: "+(e.message||String(e));
+      console.error("IPTV remote click failed",e);
+    }
+  };
   list.appendChild(b);
  });
 }
